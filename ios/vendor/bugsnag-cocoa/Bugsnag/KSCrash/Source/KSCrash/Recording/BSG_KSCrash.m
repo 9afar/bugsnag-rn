@@ -31,20 +31,20 @@
 
 #import "BSG_KSCrashC.h"
 #import "BSG_KSJSONCodecObjC.h"
-#import "BSG_KSSingleton.h"
 #import "NSError+BSG_SimpleConstructor.h"
 
 //#define BSG_KSLogger_LocalLevel TRACE
 #import "BSG_KSLogger.h"
-#import "BugsnagThread.h"
+#import "BugsnagThread+Private.h"
 #import "BSGJSONSerialization.h"
 #import "BSGSerialization.h"
 #import "Bugsnag.h"
 #import "BugsnagCollections.h"
 #import "BSG_KSCrashReportFields.h"
+#import "BSGFileLocations.h"
 
 #if BSG_HAS_UIKIT
-#import <UIKit/UIKit.h>
+#import "BSGUIKit.h"
 #endif
 #if TARGET_OS_OSX
 #import <AppKit/AppKit.h>
@@ -53,11 +53,6 @@
 // ============================================================================
 #pragma mark - Default Constants -
 // ============================================================================
-
-/** The directory under "Caches" to store the crash reports. */
-#ifndef BSG_KSCRASH_DefaultReportFilesDirectory
-#define BSG_KSCRASH_DefaultReportFilesDirectory @"KSCrashReports"
-#endif
 
 #ifndef BSG_INITIAL_MACH_BINARY_IMAGE_ARRAY_SIZE
 #define BSG_INITIAL_MACH_BINARY_IMAGE_ARRAY_SIZE 400
@@ -73,13 +68,6 @@
 // ============================================================================
 #pragma mark - Globals -
 // ============================================================================
-
-@interface BugsnagThread ()
-+ (NSMutableArray<BugsnagThread *> *)threadsFromArray:(NSArray *)threads
-                                         binaryImages:(NSArray *)binaryImages
-                                                depth:(NSUInteger)depth
-                                            errorType:(NSString *)errorType;
-@end
 
 @interface BSG_KSCrash ()
 
@@ -126,27 +114,20 @@
 #pragma mark - Lifecycle -
 // ============================================================================
 
-IMPLEMENT_EXCLUSIVE_SHARED_INSTANCE(BSG_KSCrash)
-
-- (id)init {
-    return [self
-        initWithReportFilesDirectory:BSG_KSCRASH_DefaultReportFilesDirectory];
++ (BSG_KSCrash *)sharedInstance {
+    static id sharedInstance;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        sharedInstance = [[self alloc] init];
+    });
+    return sharedInstance;
 }
 
-- (id)initWithReportFilesDirectory:(NSString *)reportFilesDirectory {
+- (instancetype)init {
     if ((self = [super init])) {
         self.bundleName = [[NSBundle mainBundle] infoDictionary][@"CFBundleName"];
-
-        NSString *storePath = [BugsnagFileStore findReportStorePath:reportFilesDirectory];
-
-        if (!storePath) {
-            BSG_KSLOG_ERROR(
-                    @"Failed to initialize crash handler. Crash reporting disabled.");
-            return nil;
-        }
-
         self.nextCrashID = [NSUUID UUID].UUIDString;
-        self.crashReportStore = [BSG_KSCrashReportStore storeWithPath:storePath];
+        self.crashReportStore = [BSG_KSCrashReportStore storeWithPath:[BSGFileLocations current].kscrashReports];
         self.introspectMemory = YES;
         self.maxStoredReports = 5;
 
@@ -231,7 +212,7 @@ IMPLEMENT_EXCLUSIVE_SHARED_INSTANCE(BSG_KSCrash)
 
 - (BOOL)install {
 
-    _handlingCrashTypes = bsg_kscrash_install(
+    self.handlingCrashTypes = bsg_kscrash_install(
         [self.crashReportPath UTF8String], [self.recrashReportPath UTF8String],
         [self.stateFilePath UTF8String], [self.nextCrashID UTF8String]);
     if (self.handlingCrashTypes == 0) {
@@ -283,82 +264,63 @@ IMPLEMENT_EXCLUSIVE_SHARED_INSTANCE(BSG_KSCrash)
     [self.crashReportStore pruneFilesLeaving:self.maxStoredReports];
 
     NSDictionary *reports = [self allReportsByFilename];
+    if (!reports.count) {
+        return;
+    }
+    
+    [self sendReports:reports completionHander:nil];
+}
 
-    BSG_KSLOG_INFO(@"Sending %d crash reports", [reports count]);
+- (void)sendLatestReport:(dispatch_block_t)completionHander {
+    [self.crashReportStore pruneFilesLeaving:self.maxStoredReports];
+    
+    NSString *fileId = [self.crashReportStore fileIds].lastObject;
+    if (!fileId) {
+        if (completionHander) {
+            completionHander();
+        }
+        return;
+    }
+    
+    NSDictionary *contents = [self.crashReportStore fileWithId:fileId];
+    if (!contents) {
+        if (completionHander) {
+            completionHander();
+        }
+        return;
+    }
+    
+    [self sendReports:@{fileId: contents} completionHander:completionHander];
+}
+
+- (void)sendReports:(NSDictionary<NSString *, NSDictionary *> *)reports
+   completionHander:(dispatch_block_t)completionHander {
+    BSG_KSLOG_INFO(@"Sending %lu crash reports", (unsigned long)reports.count);
 
     [self sendReports:reports
             withBlock:^(NSString *filename, BOOL completed,
                     NSError *error) {
-                BSG_KSLOG_DEBUG(@"Process finished with completion: %d", completed);
+                BSG_KSLOG_DEBUG(@"Sending finished with completion: %d", completed);
                 if (error != nil) {
                     BSG_KSLOG_ERROR(@"Failed to send reports: %@", error);
                 }
                 if (completed && filename != nil) {
+                    BSG_KSLOG_DEBUG(@"Deleting KSCrashReport %@", filename);
                     [self.crashReportStore deleteFileWithId:filename];
                 }
+                if (completionHander) {
+                    completionHander();
+                }
             }];
-}
-
-- (NSArray<BugsnagThread *> *)captureThreads:(NSException *)exc
-                                       depth:(int)depth
-                            recordAllThreads:(BOOL)recordAllThreads {
-    NSArray *addresses = [exc callStackReturnAddresses];
-    int numFrames = (int) [addresses count];
-    uintptr_t *callstack;
-
-    if (numFrames > 0) {
-        depth = 0; // reset depth if the stack does not need to be generated
-        callstack = malloc(numFrames * sizeof(*callstack));
-
-        for (NSUInteger i = 0; i < numFrames; i++) {
-            callstack[i] = [addresses[i] unsignedLongValue];
-        }
-    } else {
-        // generate a backtrace. This is required for NSError for example,
-        // which does not have a useful stacktrace generated.
-        numFrames = 100;
-        callstack = malloc(numFrames * sizeof(*callstack));
-
-        BSG_KSLOG_DEBUG(@"Fetching call stack.");
-        numFrames = backtrace((void **)callstack, numFrames);
-        if (numFrames <= 0) {
-            BSG_KSLOG_ERROR(@"backtrace() returned call stack length of %d", numFrames);
-            numFrames = 0;
-        }
-    }
-    
-    NSString *tracePath = [NSTemporaryDirectory() stringByAppendingPathComponent:
-                           [NSUUID UUID].UUIDString];
-    bsg_kscrash_captureThreadTrace(depth, numFrames, callstack, recordAllThreads,
-                                   tracePath.fileSystemRepresentation);
-    free(callstack);
-    
-    NSData *jsonData = [NSData dataWithContentsOfFile:tracePath];
-    NSError *error = nil;
-    NSDictionary *json = [BSGJSONSerialization
-                          JSONObjectWithData:jsonData options:0 error:&error];
-    
-    [[NSFileManager defaultManager] removeItemAtPath:tracePath error:NULL];
-    
-    if (json) {	
-        return [BugsnagThread threadsFromArray:[json valueForKeyPath:@"crash.threads"]
-                                  binaryImages:json[@"binary_images"]
-                                         depth:depth
-                                     errorType:nil];
-    } else {
-        BSG_KSLOG_ERROR(@"Failed to decode thread trace JSON, error = %@",
-                        error);
-    }
-    return @[];
 }
 
 - (NSDictionary *)captureAppStats {
     BSG_KSCrash_State state = crashContext()->state;
     bsg_kscrashstate_updateDurationStats(&state);
     NSMutableDictionary *dict = [NSMutableDictionary new];
-    BSGDictSetSafeObject(dict, @(state.foregroundDurationSinceLaunch), @BSG_KSCrashField_ActiveTimeSinceLaunch);
-    BSGDictSetSafeObject(dict, @(state.backgroundDurationSinceLaunch), @BSG_KSCrashField_BGTimeSinceLaunch);
-    BSGDictSetSafeObject(dict, @(state.applicationIsInForeground), @BSG_KSCrashField_AppInFG);
+    dict[@BSG_KSCrashField_ActiveTimeSinceLaunch] = @(state.foregroundDurationSinceLaunch);
+    dict[@BSG_KSCrashField_BGTimeSinceLaunch] = @(state.backgroundDurationSinceLaunch);
+    dict[@BSG_KSCrashField_AppInFG] = @(state.applicationIsInForeground);
     return dict;
 }
 
@@ -415,22 +377,22 @@ BSG_SYNTHESIZE_CRASH_STATE_PROPERTY(BOOL, crashedLastLaunch)
 - (void)sendReports:(NSDictionary <NSString *, NSDictionary *> *)reports
           withBlock:(BSGOnErrorSentBlock)block {
     if ([reports count] == 0) {
-        block(nil, YES, nil);
+        if (block) {
+            block(nil, YES, nil);
+        }
         return;
     }
 
     if (self.sink == nil) {
-        block(nil, NO, [NSError bsg_errorWithDomain:[[self class] description]
-                                               code:0
-                                        description:@"No sink set. Crash reports not sent."]);
+        if (block) {
+            block(nil, NO, [NSError bsg_errorWithDomain:[[self class] description]
+                                                   code:0
+                                            description:@"No sink set. Crash reports not sent."]);
+        }
         return;
     }
     [self.sink sendStoredReports:reports
                        withBlock:block];
-}
-
-- (NSArray *)allReports {
-    return [self.crashReportStore allFiles];
 }
 
 - (NSDictionary <NSString *, NSDictionary *> *)allReportsByFilename {

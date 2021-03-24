@@ -14,7 +14,7 @@ echo "Clearing local maven repo"
 rm -rf $MAVEN_REPO_DIR
 
 echo "Building local copy of bugsnag-android $AMENDED_VERSION"
-./$ANDROID_REPO_DIR/gradlew -p $ANDROID_REPO_DIR assembleRelease publishToMavenLocal -PVERSION_NAME=$AMENDED_VERSION
+./$ANDROID_REPO_DIR/gradlew -p $ANDROID_REPO_DIR clean assembleRelease publishToMavenLocal -PVERSION_NAME=$AMENDED_VERSION
 
 echo "Removing previous AARs from bugsnag-js"
 rm -rf $AAR_DST
@@ -25,3 +25,6 @@ cp -r $MAVEN_REPO_DIR $AAR_DST
 echo "Recording version"
 rm -rf ./android/.bugsnag-android-version
 echo $(cd $ANDROID_REPO_DIR && git rev-parse HEAD) >> ./android/.bugsnag-android-version
+
+sed -i '' "s/api \"com.bugsnag:bugsnag-android:.*/api \"com.bugsnag:bugsnag-android:$AMENDED_VERSION\"/" android/build.gradle
+sed -i '' "s/api \"com.bugsnag:bugsnag-plugin-react-native:.*/api \"com.bugsnag:bugsnag-plugin-react-native:$AMENDED_VERSION\"/" android/build.gradle

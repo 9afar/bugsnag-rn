@@ -7,7 +7,8 @@
 //
 
 #import <Foundation/Foundation.h>
-#import "BugsnagMetadataStore.h"
+
+#import <Bugsnag/BugsnagMetadataStore.h>
 
 @class BugsnagConfiguration;
 @class BugsnagHandledState;
@@ -20,12 +21,18 @@
 @class BugsnagError;
 @class BugsnagUser;
 
+/**
+ * Represents the importance of a particular event.
+ */
 typedef NS_ENUM(NSUInteger, BSGSeverity) {
     BSGSeverityError,
     BSGSeverityWarning,
     BSGSeverityInfo,
 };
 
+/**
+ * Represents an occurrence of an error, along with information about the state of the app and device.
+ */
 @interface BugsnagEvent : NSObject <BugsnagMetadataStore>
 
 // -----------------------------------------------------------------------------
@@ -61,10 +68,10 @@ typedef NS_ENUM(NSUInteger, BSGSeverity) {
 
 /**
  * A per-event override for the apiKey.
- * - Reads default to the BugsnagConfiguration apiKey value unless explicitly set.
+ * - The default value of nil results in the BugsnagConfiguration apiKey being used.
  * - Writes are not persisted to BugsnagConfiguration.
  */
-@property(readwrite, copy, nullable) NSString *apiKey;
+@property(readwrite, copy, nullable, nonatomic) NSString *apiKey;
 
 /**
  *  Device information such as OS name and version
@@ -80,7 +87,7 @@ typedef NS_ENUM(NSUInteger, BSGSeverity) {
  * Whether the event was a crash (i.e. unhandled) or handled error in which the system
  * continued running.
  */
-@property(readonly) BOOL unhandled;
+@property(readwrite) BOOL unhandled;
 
 /**
  * Thread traces for the error that occurred, if collection was enabled.
@@ -95,7 +102,7 @@ typedef NS_ENUM(NSUInteger, BSGSeverity) {
  * Bugsnag dashboard. Use event.errors to access and amend the representation of
  * the error that will be sent.
  */
-@property(nullable) id originalError;
+@property(strong, nullable, nonatomic) id originalError;
 
 
 // =============================================================================

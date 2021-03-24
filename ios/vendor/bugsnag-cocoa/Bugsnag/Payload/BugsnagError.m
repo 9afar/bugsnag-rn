@@ -6,13 +6,16 @@
 //  Copyright © 2020 Bugsnag. All rights reserved.
 //
 
-#import "BugsnagError.h"
-#import "BugsnagKeys.h"
-#import "BugsnagStackframe.h"
-#import "BugsnagStacktrace.h"
+#import "BugsnagError+Private.h"
+
+#import "BSG_KSCrashReportFields.h"
 #import "BugsnagCollections.h"
-#import "RegisterErrorData.h"
-#import "BugsnagThread.h"
+#import "BugsnagKeys.h"
+#import "BugsnagLogger.h"
+#import "BugsnagStackframe+Private.h"
+#import "BugsnagStacktrace.h"
+#import "BugsnagThread+Private.h"
+
 
 NSString *_Nonnull BSGSerializeErrorType(BSGErrorType errorType) {
     switch (errorType) {
@@ -22,8 +25,6 @@ NSString *_Nonnull BSGSerializeErrorType(BSGErrorType errorType) {
             return @"c";
         case BSGErrorTypeReactNativeJs:
             return @"reactnativejs";
-        default:
-            return nil;
     }
 }
 
@@ -71,15 +72,6 @@ NSString *BSGParseErrorMessage(NSDictionary *report, NSDictionary *error, NSStri
     return error[BSGKeyReason] ?: @"";
 }
 
-@interface BugsnagStackframe ()
-- (NSDictionary *)toDictionary;
-+ (BugsnagStackframe *)frameFromJson:(NSDictionary *)json;
-@end
-
-@interface BugsnagStacktrace ()
-@property NSMutableArray<BugsnagStackframe *> *trace;
-@end
-
 @implementation BugsnagError
 
 - (instancetype)initWithErrorReportingThread:(BugsnagThread *)thread {
@@ -95,12 +87,6 @@ NSString *BSGParseErrorMessage(NSDictionary *report, NSDictionary *error, NSStri
         _type = BSGErrorTypeCocoa;
 
         if (![[event valueForKeyPath:@"user.state.didOOM"] boolValue]) {
-            NSArray *threadDict = [event valueForKeyPath:@"crash.threads"];
-            RegisterErrorData *data = [RegisterErrorData errorDataFromThreads:threadDict];
-            if (data) {
-                _errorClass = data.errorClass;
-                _errorMessage = data.errorMessage;
-            }
             _stacktrace = thread.stacktrace;
         }
     }
@@ -140,6 +126,44 @@ NSString *BSGParseErrorMessage(NSDictionary *report, NSDictionary *error, NSStri
     return error;
 }
 
+- (void)updateWithCrashInfoMessage:(NSString *)crashInfoMessage {
+    NSArray<NSString *> *patterns = @[
+        // From Swift 2.2: https://github.com/apple/swift/blob/swift-2.2-RELEASE/stdlib/public/stubs/Assert.cpp#L24-L39
+        @"^(assertion failed|fatal error|precondition failed): ((.+): )?file .+, line \\d+\n$",
+        // From Swift 4.1: https://github.com/apple/swift/commit/d03a575279cf5c523779ef68f8d7903f09ba901e
+        @"^(Assertion failed|Fatal error|Precondition failed): ((.+): )?file .+, line \\d+\n$",
+        // From Swift 5.4: https://github.com/apple/swift/commit/1a051719e3b1b7c37a856684dd037d482fef8e59
+        @"^.+:\\d+: (Assertion failed|Fatal error|Precondition failed)(: (.+))?\n$",
+    ];
+    
+    for (NSString *pattern in patterns) {
+        NSArray<NSTextCheckingResult *> *matches = nil;
+        @try {
+            NSRegularExpression *regex = [[NSRegularExpression alloc] initWithPattern:pattern options:0 error:nil];
+            matches = [regex matchesInString:crashInfoMessage options:0 range:NSMakeRange(0, crashInfoMessage.length)];
+        } @catch (NSException *exception) {
+            bsg_log_err(@"Exception thrown while parsing crash info message: %@", exception);
+        }
+        if (matches.count != 1 || matches[0].numberOfRanges != 4) {
+            continue;
+        }
+        NSRange errorClassRange = [matches[0] rangeAtIndex:1];
+        if (errorClassRange.location != NSNotFound) {
+            self.errorClass = [crashInfoMessage substringWithRange:errorClassRange];
+        }
+        NSRange errorMessageRange = [matches[0] rangeAtIndex:3];
+        if (errorMessageRange.location != NSNotFound) {
+            self.errorMessage = [crashInfoMessage substringWithRange:errorMessageRange];
+        }
+        return; //!OCLint
+    }
+    
+    if (!self.errorMessage.length) {
+        // It's better to fall back to the raw string than have an empty errorMessage.
+        self.errorMessage = crashInfoMessage;
+    }
+}
+
 - (NSDictionary *)findErrorReportingThread:(NSDictionary *)event {
     NSArray *threads = [event valueForKeyPath:@"crash.threads"];
 
@@ -153,16 +177,16 @@ NSString *BSGParseErrorMessage(NSDictionary *report, NSDictionary *error, NSStri
 
 - (NSDictionary *)toDictionary {
     NSMutableDictionary *dict = [NSMutableDictionary new];
-    BSGDictInsertIfNotNil(dict, self.errorClass, BSGKeyErrorClass);
-    BSGDictInsertIfNotNil(dict, self.errorMessage, BSGKeyMessage);
-    BSGDictInsertIfNotNil(dict, BSGSerializeErrorType(self.type), BSGKeyType);
+    dict[BSGKeyErrorClass] = self.errorClass;
+    dict[BSGKeyMessage] = self.errorMessage;
+    dict[BSGKeyType] = BSGSerializeErrorType(self.type);
 
     NSMutableArray *frames = [NSMutableArray new];
     for (BugsnagStackframe *frame in self.stacktrace) {
         [frames addObject:[frame toDictionary]];
     }
 
-    BSGDictSetSafeObject(dict, frames, BSGKeyStacktrace);
+    dict[BSGKeyStacktrace] = frames;
     return dict;
 }
 

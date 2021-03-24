@@ -26,12 +26,12 @@
 
 #import <Foundation/Foundation.h>
 
-#import "BSG_KSCrashReportWriter.h"
-#import "BugsnagBreadcrumb.h"
-#import "BugsnagEvent.h"
-#import "BugsnagMetadata.h"
-#import "BugsnagPlugin.h"
-#import "BugsnagMetadataStore.h"
+#import <Bugsnag/BSG_KSCrashReportWriter.h>
+#import <Bugsnag/BugsnagBreadcrumb.h>
+#import <Bugsnag/BugsnagEvent.h>
+#import <Bugsnag/BugsnagMetadata.h>
+#import <Bugsnag/BugsnagMetadataStore.h>
+#import <Bugsnag/BugsnagPlugin.h>
 
 @class BugsnagUser;
 @class BugsnagEndpointConfiguration;
@@ -98,6 +98,9 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
 // MARK: - BugsnagConfiguration
 // =============================================================================
 
+/**
+ * Contains user-provided configuration, including API key and endpoints.
+ */
 @interface BugsnagConfiguration : NSObject <BugsnagMetadataStore>
 
 /**
@@ -111,7 +114,7 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
 /**
  * Initializes a new configuration object with the provided API key.
  */
-- (instancetype)initWithApiKey:(NSString *)apiKey NS_DESIGNATED_INITIALIZER NS_SWIFT_NAME(init(_:));
+- (instancetype)initWithApiKey:(nullable NSString *)apiKey NS_DESIGNATED_INITIALIZER NS_SWIFT_NAME(init(_:));
 
 /**
  * Required declaration to suppress a superclass designated-initializer error
@@ -125,18 +128,18 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
 /**
  *  The API key of a Bugsnag project
  */
-@property(readwrite, retain, nonnull) NSString *apiKey;
+@property (copy, nonatomic) NSString *apiKey;
 
 /**
  *  The release stage of the application, such as production, development, beta
  *  et cetera
  */
-@property(readwrite, retain, nullable) NSString *releaseStage;
+@property (copy, nullable, nonatomic) NSString *releaseStage;
 
 /**
  *  Release stages which are allowed to notify Bugsnag
  */
-@property(readwrite, retain, nullable) NSSet<NSString *> *enabledReleaseStages;
+@property (copy, nullable, nonatomic) NSSet<NSString *> *enabledReleaseStages;
 
 /**
  * Sets which values should be removed from any Metadata objects before
@@ -147,17 +150,31 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
  * By default, redactedKeys is set to ["password"]. Both string literals and regex
  * values can be supplied to this property.
  */
-@property(readwrite, retain, nullable) NSSet<id> *redactedKeys;
+@property (copy, nullable, nonatomic) NSSet<id> *redactedKeys;
+
+/**
+ * A set of strings and / or NSRegularExpression objects that determine which errors should
+ * be discarded based on their `errorClass`.
+ *
+ * Comparisons are case sensitive.
+ *
+ * OnError / OnSendError blocks will not be called for discarded errors.
+ *
+ * Some examples of errorClass are: Objective-C exception names like "NSRangeException",
+ * signal names like "SIGABRT", mach exception names like "EXC_BREAKPOINT", and Swift
+ * error names like "Fatal error".
+ */
+@property (copy, nullable, nonatomic) NSSet<id> *discardClasses;
 
 /**
  *  A general summary of what was occuring in the application
  */
-@property(readwrite, retain, nullable) NSString *context;
+@property (copy, nullable, nonatomic) NSString *context;
 
 /**
  *  The version of the application
  */
-@property(readwrite, retain, nullable) NSString *appVersion;
+@property (copy, nullable, nonatomic) NSString *appVersion;
 
 /**
  *  The URL session used to send requests to Bugsnag.
@@ -193,6 +210,30 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
 @property BOOL autoTrackSessions;
 
 /**
+ * The amount of time (in milliseconds) after starting Bugsnag that should be considered part of
+ * the app's launch.
+ *
+ * Events that occur during app launch will have the `BugsnagAppWithState.isLaunching` property
+ * set to true.
+ *
+ * By default this value is 5000 milliseconds.
+ *
+ * Setting this to `0` will cause Bugsnag to consider the app to be launching until
+ * `+[Bugsnag markLaunchCompleted]` or `-[BugsnagClient markLaunchCompleted]` has been called.
+ */
+@property (nonatomic) NSUInteger launchDurationMillis;
+
+/**
+ * Determines whether launch crashes should be sent synchronously during `+[Bugsnag start]`.
+ *
+ * If true and the previous run terminated due to a crash during app launch, `+[Bugsnag start]`
+ * will block the calling thread for up to 2 seconds while the crash report is sent.
+ *
+ * By default this value is true.
+ */
+@property (nonatomic) BOOL sendLaunchCrashesSynchronously;
+
+/**
  * The types of breadcrumbs which will be captured. By default, this is all types.
  */
 @property BSGEnabledBreadcrumbType enabledBreadcrumbTypes;
@@ -200,9 +241,25 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
 /**
  * The app's bundleVersion, set from the CFBundleVersion.  Equivalent to `versionCode` on Android.
  */
-@property (readwrite, retain, nullable) NSString *bundleVersion;
+@property (copy, nullable, nonatomic) NSString *bundleVersion;
 
-@property(retain, nullable) NSString *appType;
+@property (copy, nullable, nonatomic) NSString *appType;
+
+/**
+ * Sets the maximum number of events which will be stored. Once the threshold is reached,
+ * the oldest events will be deleted.
+ *
+ * By default, 32 events are persisted.
+ */
+@property (nonatomic) NSUInteger maxPersistedEvents;
+
+/**
+ * Sets the maximum number of sessions which will be stored. Once the threshold is reached,
+ * the oldest sessions will be deleted.
+ *
+ * By default, 128 sessions are persisted.
+ */
+@property (nonatomic) NSUInteger maxPersistedSessions;
 
 /**
  * Sets the maximum number of breadcrumbs which will be stored. Once the threshold is reached,
@@ -226,7 +283,7 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
  * A class defining the types of error that are reported. By default,
  * all properties are true.
  */
-@property BugsnagErrorTypes *_Nonnull enabledErrorTypes;
+@property (strong, nonatomic) BugsnagErrorTypes *enabledErrorTypes;
 
 /**
  * Set the endpoints to send data to. By default we'll send error reports to
@@ -237,7 +294,7 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
  * missing, an assertion will be thrown. If the session endpoint is missing, a warning will be
  * logged and sessions will not be sent automatically.
  */
-@property(nonnull, nonatomic) BugsnagEndpointConfiguration *endpoints;
+@property (strong, nonatomic) BugsnagEndpointConfiguration *endpoints;
 
 // =============================================================================
 // MARK: - User
@@ -246,7 +303,7 @@ typedef BOOL (^BugsnagOnSessionBlock)(BugsnagSession *_Nonnull session);
 /**
  * The current user
  */
-@property(readonly, retain, nonnull) BugsnagUser *user;
+@property(readonly, retain, nonnull, nonatomic) BugsnagUser *user;
 
 /**
  *  Set user metadata

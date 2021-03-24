@@ -21,38 +21,9 @@
 
 #import <Foundation/Foundation.h>
 
-/**
- *  Insert an object or NSNull into a collection
- *
- *  @param dict   a mutable dictionary
- *  @param object an object or nil
- */
-void BSGDictSetSafeObject(NSMutableDictionary *dict, id object, id<NSCopying> key);
-
-/**
- *  Insert an object or NSNull into a collection
- *
- *  @param array  a mutable array
- *  @param object an object or nil
- */
-void BSGArrayAddSafeObject(NSMutableArray *array, id object);
-
-/**
- *  Insert an object into a collection only if not nil
- *
- *  @param dict   a mutable dictionary
- *  @param object an object or nil
- *  @param key    the key of the object
- */
-void BSGDictInsertIfNotNil(NSMutableDictionary *dict, id object, id<NSCopying> key);
-
-/**
- *  Insert an object into a collection only if not nil
- *
- *  @param array  a mutable array
- *  @param object an object or nil
- */
-void BSGArrayInsertIfNotNil(NSMutableArray *array, id object);
+/// Returns a new array containing the elements starting at position `index`, or
+/// an empty array if `index` is beyond the array's range range of elements.
+NSArray * BSGArraySubarrayFromIndex(NSArray *array, NSUInteger index);
 
 /**
  *  Merge values from source dictionary with destination
@@ -61,3 +32,8 @@ void BSGArrayInsertIfNotNil(NSMutableArray *array, id object);
  *  @param destination a dictionary or nil
  */
 NSDictionary *BSGDictMerge(NSDictionary *source, NSDictionary *destination);
+
+/// Returns a representation of the dictionary that contains only valid JSON.
+/// Any dictionary keys that are not strings will be ignored.
+/// Any values that are not valid JSON will be replaced by a string description.
+NSDictionary * BSGJSONDictionary(NSDictionary *dictionary);

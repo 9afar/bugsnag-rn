@@ -25,22 +25,26 @@
 //
 #import <Foundation/Foundation.h>
 
-#import "BugsnagConfiguration.h"
-#import "BugsnagMetadata.h"
-#import "BugsnagPlugin.h"
-#import "BugsnagClient.h"
-#import "BugsnagEvent.h"
-#import "BugsnagApp.h"
-#import "BugsnagAppWithState.h"
-#import "BugsnagDevice.h"
-#import "BugsnagDeviceWithState.h"
-#import "BugsnagEndpointConfiguration.h"
-#import "BugsnagError.h"
-#import "BugsnagErrorTypes.h"
-#import "BugsnagSession.h"
-#import "BugsnagStackframe.h"
-#import "BugsnagThread.h"
+#import <Bugsnag/BugsnagApp.h>
+#import <Bugsnag/BugsnagAppWithState.h>
+#import <Bugsnag/BugsnagClient.h>
+#import <Bugsnag/BugsnagConfiguration.h>
+#import <Bugsnag/BugsnagDevice.h>
+#import <Bugsnag/BugsnagDeviceWithState.h>
+#import <Bugsnag/BugsnagEndpointConfiguration.h>
+#import <Bugsnag/BugsnagError.h>
+#import <Bugsnag/BugsnagErrorTypes.h>
+#import <Bugsnag/BugsnagEvent.h>
+#import <Bugsnag/BugsnagLastRunInfo.h>
+#import <Bugsnag/BugsnagMetadata.h>
+#import <Bugsnag/BugsnagPlugin.h>
+#import <Bugsnag/BugsnagSession.h>
+#import <Bugsnag/BugsnagStackframe.h>
+#import <Bugsnag/BugsnagThread.h>
 
+/**
+ * Static access to a Bugsnag Client, the easiest way to use Bugsnag in your app.
+ */
 @interface Bugsnag : NSObject <BugsnagClassLevelMetadataStore>
 
 /**
@@ -48,7 +52,8 @@
  */
 - (instancetype _Nonnull )init NS_UNAVAILABLE NS_SWIFT_UNAVAILABLE("Use class methods to initialise Bugsnag.");
 
-/** Start listening for crashes.
+/**
+ * Start listening for crashes.
  *
  * This method initializes Bugsnag with the configuration set in your Info.plist.
  *
@@ -61,7 +66,8 @@
  */
 + (BugsnagClient *_Nonnull)start;
 
-/** Start listening for crashes.
+/**
+ * Start listening for crashes.
  *
  * This method initializes Bugsnag with the default configuration and the provided
  * apiKey.
@@ -77,7 +83,8 @@
  */
 + (BugsnagClient *_Nonnull)startWithApiKey:(NSString *_Nonnull)apiKey;
 
-/** Start listening for crashes.
+/**
+ * Start listening for crashes.
  *
  * This method initializes Bugsnag with the provided configuration object.
  *
@@ -95,13 +102,27 @@
 /**
  * @return YES if Bugsnag has been started and the previous launch crashed
  */
-+ (BOOL)appDidCrashLastLaunch;
++ (BOOL)appDidCrashLastLaunch __attribute__((deprecated("use 'lastRunInfo.crashed' instead")));
+
+/**
+ * Information about the last run of the app, and whether it crashed.
+ */
+@property (class, readonly, nullable) BugsnagLastRunInfo *lastRunInfo;
+
+/**
+ * Tells Bugsnag that your app has finished launching.
+ *
+ * Errors reported after calling this method will have the `BugsnagAppWithState.isLaunching`
+ * property set to false.
+ */
++ (void)markLaunchCompleted;
 
 // =============================================================================
 // MARK: - Notify
 // =============================================================================
 
-/** Send a custom or caught exception to Bugsnag.
+/**
+ * Send a custom or caught exception to Bugsnag.
  *
  * The exception will be sent to Bugsnag in the background allowing your
  * app to continue running.

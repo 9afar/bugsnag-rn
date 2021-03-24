@@ -965,6 +965,27 @@ void bsg_kscrw_i_writeNotableAddresses(
     writer->endContainer(writer);
 }
 
+/** Write the message from the `__crash_info` Mach section into the report.
+ *
+ * @param writer The writer.
+ *
+ * @param key The object key.
+ *
+ * @param address The address of the first frame in the backtrace.
+ */
+void bsg_kscrw_i_writeCrashInfoMessage(const BSG_KSCrashReportWriter *const writer,
+                                       const char *key, uintptr_t address) {
+    BSG_Mach_Header_Info *image = bsg_mach_headers_image_at_address(address);
+    if (!image) {
+        BSG_KSLOG_ERROR("Could not locate mach header info");
+        return;
+    }
+    const char *message = bsg_mach_headers_get_crash_info_message(image);
+    if (message) {
+        writer->addStringElement(writer, key, message);
+    }
+}
+
 /** Write information about a thread to the report.
  *
  * @param writer The writer.
@@ -1020,6 +1041,10 @@ void bsg_kscrw_i_writeThread(const BSG_KSCrashReportWriter *const writer,
                 bsg_kscrw_i_writeNotableAddresses(
                     writer, BSG_KSCrashField_NotableAddresses, machineContext);
             }
+        }
+        if (isCrashedThread && backtrace && backtraceLength) {
+            bsg_kscrw_i_writeCrashInfoMessage(writer, BSG_KSCrashField_CrashInfoMessage,
+                                              backtrace[0]);
         }
     }
     writer->endContainer(writer);
@@ -1571,7 +1596,7 @@ void bsg_kscrashreport_writeStandardReport(
         }
 
         if (crashContext->config.onCrashNotify != NULL) {
-            // NOTE: The blacklist for BSG_KSCrashField_UserAtCrash children in BugsnagEvent.m
+            // NOTE: The deny list for BSG_KSCrashField_UserAtCrash children in BugsnagEvent.m
             // should be updated when adding new fields here
 
             // Write handled exception report info
@@ -1624,8 +1649,6 @@ void bsg_kscrashreport_writeOverrides(const BSG_KSCrash_Context *crashContext,
         writer->addJSONElement(writer, BSG_KSCrashField_Config,
                 crashContext->crash.userException.config);
     }
-    writer->addIntegerElement(writer, BSG_KSCrashField_DiscardDepth,
-            crashContext->crash.userException.discardDepth);
 }
 
 void bsg_kscrashreport_writeKSCrashFields(BSG_KSCrash_Context *crashContext, BSG_KSCrashReportWriter *writer) {
@@ -1655,26 +1678,6 @@ void bsg_kscrashreport_logCrash(const BSG_KSCrash_Context *const crashContext) {
     const BSG_KSCrash_SentryContext *crash = &crashContext->crash;
     bsg_kscrw_i_logCrashType(crash);
     bsg_kscrw_i_logCrashThreadBacktrace(&crashContext->crash);
-}
-
-void bsg_kscrw_i_captureThreadTrace(const BSG_KSCrash_Context *crashContext,
-                                    const char *path) {
-    int fd = open(path, O_RDWR | O_CREAT | O_EXCL, 0644);
-    if (fd < 0) {
-        BSG_KSLOG_ERROR("Could not open file %s: %s", path, strerror(errno));
-        return;
-    }
-    BSG_KSJSONEncodeContext jsonContext;
-    BSG_KSCrashReportWriter concreteWriter;
-    BSG_KSCrashReportWriter *writer = &concreteWriter;
-    bsg_kscrw_i_prepareReportWriter(writer, &jsonContext);
-    bsg_ksjsonbeginEncode(bsg_getJsonContext(writer), false,
-                          bsg_kscrw_i_addJSONData, &fd);
-    writer->beginObject(writer, BSG_KSCrashField_Report);
-    bsg_kscrw_i_writeTraceInfo(crashContext, writer);
-    writer->endContainer(writer);
-    bsg_ksjsonendEncode(bsg_getJsonContext(writer));
-    close(fd);
 }
 
 void bsg_kscrw_i_writeTraceInfo(const BSG_KSCrash_Context *crashContext,

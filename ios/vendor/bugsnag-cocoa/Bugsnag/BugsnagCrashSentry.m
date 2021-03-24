@@ -6,30 +6,30 @@
 //
 //
 
-#import "BSG_KSCrashAdvanced.h"
-#import "BSG_KSCrashC.h"
 
 #import "BugsnagCrashSentry.h"
-#import "BugsnagLogger.h"
-#import "BugsnagErrorReportSink.h"
-#import "BugsnagConfiguration.h"
-#import "Bugsnag.h"
-#import "BugsnagErrorTypes.h"
 
-NSUInteger const BSG_MAX_STORED_REPORTS = 12;
+#import "BSG_KSCrashAdvanced.h"
+#import "BSG_KSCrashC.h"
+#import "Bugsnag.h"
+#import "BugsnagConfiguration.h"
+#import "BugsnagErrorReportSink.h"
+#import "BugsnagErrorTypes.h"
+#import "BugsnagLogger.h"
 
 @implementation BugsnagCrashSentry
 
 - (void)install:(BugsnagConfiguration *)config
       apiClient:(BugsnagErrorReportApiClient *)apiClient
+       notifier:(BugsnagNotifier *)notifier
         onCrash:(BSGReportCallback)onCrash
 {
-    BugsnagErrorReportSink *sink = [[BugsnagErrorReportSink alloc] initWithApiClient:apiClient];
+    BugsnagErrorReportSink *sink = [[BugsnagErrorReportSink alloc] initWithApiClient:apiClient configuration:config notifier:notifier];
     BSG_KSCrash *ksCrash = [BSG_KSCrash sharedInstance];
     ksCrash.sink = sink;
-    ksCrash.introspectMemory = YES;
+    ksCrash.introspectMemory = NO;
     ksCrash.onCrash = onCrash;
-    ksCrash.maxStoredReports = BSG_MAX_STORED_REPORTS;
+    ksCrash.maxStoredReports = (int)config.maxPersistedEvents;
 
     // overridden elsewhere for handled errors, so we can assume that this only
     // applies to unhandled errors
@@ -86,6 +86,9 @@ NSUInteger const BSG_MAX_STORED_REPORTS = 12;
                                        eventOverrides:eventOverrides
                                              metadata:metadata
                                                config:config];
+    
+    bsg_log_debug(@"Saved KSCrashReport for \"%@\" \"%@\"", handledState[@"severityReasonType"],
+                  [[eventOverrides[@"exceptions"] firstObject] valueForKey:@"errorClass"]);
 }
 
 @end

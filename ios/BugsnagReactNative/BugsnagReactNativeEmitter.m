@@ -1,26 +1,10 @@
 #import "BugsnagReactNativeEmitter.h"
-#import "Bugsnag.h"
-#import "BugsnagClient.h"
 
-@interface BugsnagStateEvent: NSObject
-@property NSString *type;
-@property id data;
-@end
+#import "Bugsnag+Private.h"
+#import "BugsnagClient+Private.h"
+#import "BugsnagStateEvent.h"
 
 typedef void (^BugsnagObserverBlock)(BugsnagStateEvent *_Nonnull event);
-
-@interface Bugsnag ()
-+ (BugsnagClient *)client;
-@end
-
-@interface BugsnagClient ()
-- (void)addObserverWithBlock:(BugsnagObserverBlock _Nonnull)block;
-- (void)removeObserverWithBlock:(BugsnagObserverBlock _Nonnull)block;
-@end
-
-@interface BugsnagMetadata ()
-- (NSDictionary *)toDictionary;
-@end
 
 @interface BugsnagReactNativeEmitter ()
 @property BugsnagObserverBlock observerBlock;

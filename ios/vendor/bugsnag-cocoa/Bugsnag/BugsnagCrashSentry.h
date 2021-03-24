@@ -9,13 +9,17 @@
 #import <Foundation/Foundation.h>
 
 #import "BSG_KSCrashReportWriter.h"
+#import "BSG_KSCrashType.h"
 #import "BugsnagConfiguration.h"
 #import "BugsnagErrorReportApiClient.h"
+
+@class BugsnagNotifier;
 
 @interface BugsnagCrashSentry : NSObject
 
 - (void)install:(BugsnagConfiguration *)config
       apiClient:(BugsnagErrorReportApiClient *)apiClient
+       notifier:(BugsnagNotifier *)notifier
         onCrash:(BSGReportCallback)onCrash;
 
 - (void)reportUserException:(NSString *)reportName
@@ -26,5 +30,7 @@
              eventOverrides:(NSDictionary *)eventOverrides
                    metadata:(NSDictionary *)metadata
                      config:(NSDictionary *)config;
+
+- (BSG_KSCrashType)mapKSToBSGCrashTypes:(BugsnagErrorTypes *)errorTypes;
 
 @end

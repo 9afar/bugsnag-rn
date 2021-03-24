@@ -25,7 +25,7 @@
 //
 #import "BSG_RFC3339DateTool.h"
 
-#import "BugsnagBreadcrumb.h"
+#import "BugsnagBreadcrumb+Private.h"
 #import "BugsnagBreadcrumbs.h"
 #import "Bugsnag.h"
 #import "BugsnagLogger.h"
@@ -190,7 +190,9 @@ BSGBreadcrumbType BSGBreadcrumbTypeFromString(NSString *value) {
 
     for (NSDictionary *dict in json) {
         BugsnagBreadcrumb *crumb = [BugsnagBreadcrumb breadcrumbFromDict:dict];
-        [data addObject:crumb];
+        if (crumb) {
+            [data addObject:crumb];
+        }
     }
     return data;
 }

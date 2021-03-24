@@ -21,26 +21,13 @@
 
 #import "BugsnagCollections.h"
 
-void BSGDictSetSafeObject(NSMutableDictionary *dict, id object,
-                          id<NSCopying> key) {
-    dict[key] = object ?: [NSNull null];
-}
+#import "BSGJSONSerialization.h"
 
-void BSGArrayAddSafeObject(NSMutableArray *array, id object) {
-    [array addObject:object ?: [NSNull null]];
-}
-
-void BSGDictInsertIfNotNil(NSMutableDictionary *dict, id object,
-                           id<NSCopying> key) {
-    if (object && key) {
-        dict[key] = object;
+NSArray * BSGArraySubarrayFromIndex(NSArray *array, NSUInteger index) {
+    if (index >= array.count) {
+        return @[];
     }
-}
-
-void BSGArrayInsertIfNotNil(NSMutableArray *array, id object) {
-    if (object) {
-        [array addObject:object];
-    }
+    return [array subarrayWithRange:NSMakeRange(index, array.count - index)];
 }
 
 NSDictionary *BSGDictMerge(NSDictionary *source, NSDictionary *destination) {
@@ -62,4 +49,28 @@ NSDictionary *BSGDictMerge(NSDictionary *source, NSDictionary *destination) {
         dict[key] = srcEntry;
     }
     return dict;
+}
+
+NSDictionary * BSGJSONDictionary(NSDictionary *dictionary) {
+    if (!dictionary) {
+        return nil;
+    }
+    if ([BSGJSONSerialization isValidJSONObject:dictionary]) {
+        return dictionary;
+    }
+    NSMutableDictionary *json = [NSMutableDictionary dictionary];
+    for (id key in dictionary) {
+        if (![key isKindOfClass:[NSString class]]) {
+            continue;
+        }
+        const id value = dictionary[key];
+        if ([BSGJSONSerialization isValidJSONObject:@{key: value}]) {
+            json[key] = value;
+        } else if ([value isKindOfClass:[NSDictionary class]]) {
+            json[key] = BSGJSONDictionary(value);
+        } else {
+            json[key] = ((NSObject *)value).description;
+        }
+    }
+    return json;
 }

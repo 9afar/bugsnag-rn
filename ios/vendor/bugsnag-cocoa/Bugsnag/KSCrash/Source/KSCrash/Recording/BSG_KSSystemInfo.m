@@ -42,8 +42,26 @@
 
 #import <CommonCrypto/CommonDigest.h>
 #if BSG_PLATFORM_IOS || BSG_PLATFORM_TVOS
-#import <UIKit/UIKit.h>
+#import "BSGUIKit.h"
 #endif
+#import "BSG_Jailbreak.h"
+
+
+static inline bool is_jailbroken() {
+    static bool initialized_jb;
+    static bool is_jb;
+    if(!initialized_jb) {
+        get_jailbreak_status(&is_jb);
+
+        // Also keep using the old detection method.
+        if(bsg_mach_headers_image_named("MobileSubstrate", false) != NULL) {
+            is_jb = true;
+        }
+        initialized_jb = true;
+    }
+
+    return is_jb;
+}
 
 @implementation BSG_KSSystemInfo
 
@@ -176,10 +194,10 @@
     NSMutableData *data = nil;
 
 #if BSG_HAS_UIDEVICE
-    if ([[UIDevice currentDevice]
+    if ([[UIDEVICE currentDevice]
             respondsToSelector:@selector(identifierForVendor)]) {
         data = [NSMutableData dataWithLength:16];
-        [[UIDevice currentDevice].identifierForVendor
+        [[UIDEVICE currentDevice].identifierForVendor
             getUUIDBytes:data.mutableBytes];
     } else
 #endif
@@ -261,7 +279,7 @@
  * @return YES if the device is jailbroken.
  */
 + (BOOL)isJailbroken {
-    return bsg_mach_headers_image_named("MobileSubstrate", false) != NULL;
+    return is_jailbroken();
 }
 
 /** Check if the current build is a debug build.
@@ -351,74 +369,83 @@
     NSDictionary *infoDict = [mainBundle infoDictionary];
     const struct mach_header *header = _dyld_get_image_header(0);
 #ifdef __clang_version__
-    BSGDictSetSafeObject(sysInfo, @__clang_version__, @BSG_KSSystemField_ClangVersion);
+    sysInfo[@BSG_KSSystemField_ClangVersion] = @__clang_version__;
 #endif
-#if BSG_HAS_UIDEVICE
-    BSGDictSetSafeObject(sysInfo, [UIDevice currentDevice].systemName, @BSG_KSSystemField_SystemName);
-    BSGDictSetSafeObject(sysInfo, [UIDevice currentDevice].systemVersion, @BSG_KSSystemField_SystemVersion);
-#else
-    BSGDictSetSafeObject(sysInfo, @"Mac OS", @BSG_KSSystemField_SystemName);
+#if TARGET_OS_IOS
+    // Note: This does not match UIDevice.currentDevice.systemName for versions
+    // prior to (and some versions of) iOS 9 where the systemName was reported
+    // as "iPhone OS". UIDevice gets its data from MobileGestalt which is a
+    // private API. /System/Library/CoreServices/SystemVersion.plist contains
+    // the information we need but will contain the macOS information when
+    // running on the Simulator.
+    sysInfo[@BSG_KSSystemField_SystemName] = @"iOS";
+#elif TARGET_OS_OSX
+    sysInfo[@BSG_KSSystemField_SystemName] = @"Mac OS";
+#elif TARGET_OS_TV
+    sysInfo[@BSG_KSSystemField_SystemName] = @"tvOS";
+#endif
     NSOperatingSystemVersion version =
         [NSProcessInfo processInfo].operatingSystemVersion;
     NSString *systemVersion;
     if (version.patchVersion == 0) {
         systemVersion =
-            [NSString stringWithFormat:@"%ld.%ld", version.majorVersion,
-                                       version.minorVersion];
+        [NSString stringWithFormat:@"%ld.%ld",
+         (long)version.majorVersion, (long)version.minorVersion];
     } else {
-        systemVersion = [NSString
-            stringWithFormat:@"%ld.%ld.%ld", version.majorVersion,
-                             version.minorVersion, version.patchVersion];
+        systemVersion =
+        [NSString stringWithFormat:@"%ld.%ld.%ld",
+         (long)version.majorVersion, (long)version.minorVersion,
+         (long)version.patchVersion];
     }
-    BSGDictSetSafeObject(sysInfo, systemVersion, @BSG_KSSystemField_SystemVersion);
-#endif
+    sysInfo[@BSG_KSSystemField_SystemVersion] = systemVersion;
+
     if ([self isSimulatorBuild]) {
         NSString *model = [NSProcessInfo processInfo]
                               .environment[BSGKeySimulatorModelId];
-        BSGDictSetSafeObject(sysInfo, model, @BSG_KSSystemField_Machine);
-        BSGDictSetSafeObject(sysInfo, @"simulator", @BSG_KSSystemField_Model);
+        sysInfo[@BSG_KSSystemField_Machine] = model;
+        sysInfo[@BSG_KSSystemField_Model] = @"simulator";
     } else {
 #if BSG_PLATFORM_OSX
         // MacOS has the machine in the model field, and no model
-        BSGDictSetSafeObject(sysInfo, [self stringSysctl:BSGKeyHwModel], @BSG_KSSystemField_Machine);
+        sysInfo[@BSG_KSSystemField_Machine] = [self stringSysctl:BSGKeyHwModel];
 #else
-        BSGDictSetSafeObject(sysInfo, [self stringSysctl:BSGKeyHwMachine], @BSG_KSSystemField_Machine);
-        BSGDictSetSafeObject(sysInfo, [self stringSysctl:BSGKeyHwModel], @BSG_KSSystemField_Model);
+        sysInfo[@BSG_KSSystemField_Machine] = [self stringSysctl:BSGKeyHwMachine];
+        sysInfo[@BSG_KSSystemField_Model] = [self stringSysctl:BSGKeyHwModel];
 #endif
     }
-    BSGDictSetSafeObject(sysInfo, [self stringSysctl:@"kern.version"], @BSG_KSSystemField_KernelVersion);
-    BSGDictSetSafeObject(sysInfo, [self osBuildVersion], @BSG_KSSystemField_OSVersion);
-    BSGDictSetSafeObject(sysInfo, @([self isJailbroken]), @BSG_KSSystemField_Jailbroken);
-    BSGDictSetSafeObject(sysInfo, [self dateSysctl:@"kern.boottime"], @BSG_KSSystemField_BootTime);
-    BSGDictSetSafeObject(sysInfo, [NSDate date], @BSG_KSSystemField_AppStartTime);
-    BSGDictSetSafeObject(sysInfo, [self executablePath], @BSG_KSSystemField_ExecutablePath);
-    BSGDictSetSafeObject(sysInfo, infoDict[BSGKeyExecutableName], @BSG_KSSystemField_Executable);
-    BSGDictSetSafeObject(sysInfo, infoDict[@"CFBundleIdentifier"], @BSG_KSSystemField_BundleID);
-    BSGDictSetSafeObject(sysInfo, infoDict[@"CFBundleName"], @BSG_KSSystemField_BundleName);
-    BSGDictSetSafeObject(sysInfo, infoDict[@"CFBundleExecutable"], @BSG_KSSystemField_BundleExecutable);
-    BSGDictSetSafeObject(sysInfo, infoDict[@"CFBundleVersion"], @BSG_KSSystemField_BundleVersion);
-    BSGDictSetSafeObject(sysInfo, infoDict[@"CFBundleShortVersionString"], @BSG_KSSystemField_BundleShortVersion);
-    BSGDictSetSafeObject(sysInfo, [self appUUID], @BSG_KSSystemField_AppUUID);
-    BSGDictSetSafeObject(sysInfo, [self currentCPUArch], @BSG_KSSystemField_CPUArch);
-    BSGDictSetSafeObject(sysInfo, [self int32Sysctl:@BSGKeyHwCputype], @BSG_KSSystemField_CPUType);
-    BSGDictSetSafeObject(sysInfo, [self int32Sysctl:@BSGKeyHwCpusubtype], @BSG_KSSystemField_CPUSubType);
-    BSGDictSetSafeObject(sysInfo, @(header->cputype), @BSG_KSSystemField_BinaryCPUType);
-    BSGDictSetSafeObject(sysInfo, @(header->cpusubtype), @BSG_KSSystemField_BinaryCPUSubType);
-    BSGDictSetSafeObject(sysInfo, [[NSTimeZone localTimeZone] abbreviation], @BSG_KSSystemField_TimeZone);
-    BSGDictSetSafeObject(sysInfo, [NSProcessInfo processInfo].processName, @BSG_KSSystemField_ProcessName);
-    BSGDictSetSafeObject(sysInfo, @([NSProcessInfo processInfo].processIdentifier), @BSG_KSSystemField_ProcessID);
-    BSGDictSetSafeObject(sysInfo, @(getppid()), @BSG_KSSystemField_ParentProcessID);
-    BSGDictSetSafeObject(sysInfo, [self deviceAndAppHash], @BSG_KSSystemField_DeviceAppHash);
-    BSGDictSetSafeObject(sysInfo, [BSG_KSSystemInfo buildType], @BSG_KSSystemField_BuildType);
+    sysInfo[@BSG_KSSystemField_KernelVersion] = [self stringSysctl:@"kern.version"];
+    sysInfo[@BSG_KSSystemField_OSVersion] = [self osBuildVersion];
+    sysInfo[@BSG_KSSystemField_Jailbroken] = @([self isJailbroken]);
+    sysInfo[@BSG_KSSystemField_BootTime] = [self dateSysctl:@"kern.boottime"];
+    sysInfo[@BSG_KSSystemField_AppStartTime] = [NSDate date];
+    sysInfo[@BSG_KSSystemField_ExecutablePath] = [self executablePath];
+    sysInfo[@BSG_KSSystemField_Executable] = infoDict[BSGKeyExecutableName];
+    sysInfo[@BSG_KSSystemField_BundleID] = infoDict[@"CFBundleIdentifier"];
+    sysInfo[@BSG_KSSystemField_BundleName] = infoDict[@"CFBundleName"];
+    sysInfo[@BSG_KSSystemField_BundleExecutable] = infoDict[@"CFBundleExecutable"];
+    sysInfo[@BSG_KSSystemField_BundleVersion] = infoDict[@"CFBundleVersion"];
+    sysInfo[@BSG_KSSystemField_BundleShortVersion] = infoDict[@"CFBundleShortVersionString"];
+    sysInfo[@BSG_KSSystemField_AppUUID] = [self appUUID];
+    sysInfo[@BSG_KSSystemField_CPUArch] = [self currentCPUArch];
+    sysInfo[@BSG_KSSystemField_CPUType] = [self int32Sysctl:@BSGKeyHwCputype];
+    sysInfo[@BSG_KSSystemField_CPUSubType] = [self int32Sysctl:@BSGKeyHwCpusubtype];
+    sysInfo[@BSG_KSSystemField_BinaryCPUType] = @(header->cputype);
+    sysInfo[@BSG_KSSystemField_BinaryCPUSubType] = @(header->cpusubtype);
+    sysInfo[@BSG_KSSystemField_TimeZone] = [[NSTimeZone localTimeZone] abbreviation];
+    sysInfo[@BSG_KSSystemField_ProcessName] = [NSProcessInfo processInfo].processName;
+    sysInfo[@BSG_KSSystemField_ProcessID] = @([NSProcessInfo processInfo].processIdentifier);
+    sysInfo[@BSG_KSSystemField_ParentProcessID] = @(getppid());
+    sysInfo[@BSG_KSSystemField_DeviceAppHash] = [self deviceAndAppHash];
+    sysInfo[@BSG_KSSystemField_BuildType] = [BSG_KSSystemInfo buildType];
 
-    NSDictionary *memory = @{
-            @BSG_KSSystemField_Size: [self int64Sysctl:@"hw.memsize"],
-            @BSG_KSCrashField_Usable: @(bsg_ksmachusableMemory())
+    sysInfo[@(BSG_KSSystemField_Memory)] = @{
+        @(BSG_KSCrashField_Free): @(bsg_ksmachfreeMemory()),
+        @(BSG_KSCrashField_Usable): @(bsg_ksmachusableMemory()),
+        @(BSG_KSSystemField_Size): [self int64Sysctl:@"hw.memsize"]
     };
-    BSGDictSetSafeObject(sysInfo, memory, @BSG_KSSystemField_Memory);
 
     NSDictionary *statsInfo = [[BSG_KSCrash sharedInstance] captureAppStats];
-    BSGDictSetSafeObject(sysInfo, statsInfo, @BSG_KSCrashField_AppStats);
+    sysInfo[@BSG_KSCrashField_AppStats] = statsInfo;
     return sysInfo;
 }
 
@@ -458,7 +485,7 @@
         // Calling this API indirectly to avoid a compile-time check that
         // [UIApplication sharedApplication] is not called from app extensions
         // (which is handled above)
-        UIApplication *app = [UIApplication performSelector:@selector(sharedApplication)];
+        UIApplication *app = [UIAPPLICATION performSelector:@selector(sharedApplication)];
         return [app applicationState];
     };
 
@@ -494,8 +521,11 @@
 
 const char *bsg_kssysteminfo_toJSON(void) {
     NSError *error;
-    NSDictionary *systemInfo = [NSMutableDictionary
-        dictionaryWithDictionary:[BSG_KSSystemInfo systemInfo]];
+    NSMutableDictionary *systemInfo = [[BSG_KSSystemInfo systemInfo] mutableCopy];
+
+    // Make sure the jailbroken status didn't get patched out.
+    systemInfo[@BSG_KSSystemField_Jailbroken] = @(is_jailbroken());
+
     NSMutableData *jsonData =
         (NSMutableData *)[BSG_KSJSONCodec encode:systemInfo
                                          options:BSG_KSJSONEncodeOptionSorted

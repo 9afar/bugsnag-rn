@@ -36,7 +36,7 @@
 #include "BSG_KSLogger.h"
 
 #if (TARGET_OS_TV || TARGET_OS_IPHONE || TARGET_IPHONE_SIMULATOR)
-#import <UIKit/UIKit.h>
+#import "BSGUIKit.h"
 #endif
 #include <errno.h>
 #include <fcntl.h>
@@ -180,7 +180,9 @@ bool bsg_kscrashstate_i_loadState(BSG_KSCrash_State *const context,
     NSError *error = nil;
     NSData *data = [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:path] options:0 error:&error];
     if (error != nil) {
-        BSG_KSLOG_ERROR(@"%s: Could not load file: %@", path, error);
+        if (!(error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError)) {
+            BSG_KSLOG_ERROR(@"%s: Could not load file: %@", path, error);
+        }
         return false;
     }
     id objectContext = [BSG_KSJSONCodec decode:data options:0 error:&error];
@@ -192,7 +194,7 @@ bool bsg_kscrashstate_i_loadState(BSG_KSCrash_State *const context,
     context->foregroundDurationSinceLastCrash = [objectContext[@"foregroundDurationSinceLastCrash"] doubleValue];
     context->foregroundDurationSinceLaunch = [objectContext[@"foregroundDurationSinceLaunch"] doubleValue];
     context->appLaunchTime = [objectContext[@"appLaunchTime"] unsignedLongLongValue];
-    context->appStateTransitionTime = [objectContext[@"appStateTransitionTime"] unsignedLongLongValue];
+    context->lastUpdateDurationsTime = [objectContext[@"appStateTransitionTime"] unsignedLongLongValue];
     context->launchesSinceLastCrash = [objectContext[@"launchesSinceLastCrash"] intValue];
     context->sessionsSinceLastCrash = [objectContext[@"sessionsSinceLastCrash"] intValue];
     context->sessionsSinceLaunch = [objectContext[@"sessionsSinceLaunch"] intValue];
@@ -320,7 +322,7 @@ void bsg_kscrashstate_notifyAppInForeground(const bool isInForeground) {
     state->applicationIsInForeground = isInForeground;
     uint64_t timeNow = mach_absolute_time();
     double duration = bsg_ksmachtimeDifferenceInSeconds(
-        timeNow, state->appStateTransitionTime);
+        timeNow, state->lastUpdateDurationsTime);
     if (isInForeground) {
         state->backgroundDurationSinceLaunch += duration;
         state->backgroundDurationSinceLastCrash += duration;
@@ -331,7 +333,7 @@ void bsg_kscrashstate_notifyAppInForeground(const bool isInForeground) {
         state->foregroundDurationSinceLastCrash += duration;
         bsg_kscrashstate_i_saveState(state, stateFilePath);
     }
-    state->appStateTransitionTime = timeNow;
+    state->lastUpdateDurationsTime = timeNow;
 }
 
 void bsg_kscrashstate_notifyAppTerminate(void) {
@@ -339,7 +341,7 @@ void bsg_kscrashstate_notifyAppTerminate(void) {
     const char *const stateFilePath = bsg_g_stateFilePath;
 
     const double duration = bsg_ksmachtimeDifferenceInSeconds(
-        mach_absolute_time(), state->appStateTransitionTime);
+        mach_absolute_time(), state->lastUpdateDurationsTime);
     state->backgroundDurationSinceLastCrash += duration;
     bsg_kscrashstate_i_saveState(state, stateFilePath);
 }
@@ -356,8 +358,9 @@ void bsg_kscrashstate_notifyAppCrash(BSG_KSCrashType type) {
 }
 
 void bsg_kscrashstate_updateDurationStats(BSG_KSCrash_State *const state) {
+    uint64_t timeNow = mach_absolute_time();
     const double duration = bsg_ksmachtimeDifferenceInSeconds(
-        mach_absolute_time(), state->appStateTransitionTime);
+        timeNow, state->lastUpdateDurationsTime ?: state->appLaunchTime);
     if (state->applicationIsInForeground) {
         state->foregroundDurationSinceLaunch += duration;
         state->foregroundDurationSinceLastCrash += duration;
@@ -365,6 +368,7 @@ void bsg_kscrashstate_updateDurationStats(BSG_KSCrash_State *const state) {
         state->backgroundDurationSinceLaunch += duration;
         state->backgroundDurationSinceLastCrash += duration;
     }
+    state->lastUpdateDurationsTime = timeNow;
 }
 
 const BSG_KSCrash_State *bsg_kscrashstate_currentState(void) {
